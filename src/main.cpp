@@ -30,26 +30,25 @@ class SensorData {
         }
         
         void set_temperature_celcius(DallasTemperature &sensors) {
-            _temperature_C = sensors.getTempC(_dev_address);
-            Serial.println("Temperature is ");
+            float tmp = sensors.getTempC(_dev_address);
+            if (tmp == DEVICE_DISCONNECTED_C) {
+                Serial.println("Error: Could not read temperature data");
+                return;
+            }
+            _temperature_C = tmp;
+            Serial.println("I am in set: ");
             Serial.print(_temperature_C);
-
-        }
-
-        float set_temperature_celcius(const float &new_temp) {
-            _temperature_C = new_temp;
         }
 
         float get_temperature_celcius() const {
+            Serial.println("I am in here: ");
+            // Serial.print(_temperature_C);
+            Serial.print(_temperature_C, 3);
             return _temperature_C;
         }
 
         // function to print the temperature for a device
         void print_temperature() {
-            if (_temperature_C == DEVICE_DISCONNECTED_C) {
-                Serial.println("Error: Could not read temperature data");
-                return;
-            }
             Serial.print("Temp C: ");
             Serial.print(_temperature_C, 3);
         }
@@ -72,7 +71,7 @@ class SensorData {
 
         // main function to print information about a device
         void print_data() {
-            Serial.print("Device Address: ");
+            Serial.println("Device Address: ");
             print_address();
             Serial.print(" ");
             print_temperature();
@@ -167,11 +166,10 @@ void setup() {
     }
 
     Serial.println("Initializing CAN interface...");
-    // init_can();
+    init_can();
     Serial.println("Initialization successful!");
 }
 
-unsigned char stmp[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
 void loop() {
 
@@ -180,31 +178,21 @@ void loop() {
     // convert the temperature reading
     sensors.requestTemperatures();
 
+    unsigned char can_data[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+
     for (size_t i = 0; i < device_count; i++) {
-        SensorData curr_sensor = sensor_data_array[i];
+        SensorData &curr_sensor = sensor_data_array[i];
         curr_sensor.set_temperature_celcius(sensors);
         curr_sensor.print_data();
     }
 
-    // send data:  id = 0x00, standrad frame, data len = 8, stmp: data buf
-    // Figure out a way to arrange this over CAN
-    // device_count, temperature1, temperature2 .....
-    // address?
-    stmp[7] = stmp[7] + 1;
-    if (stmp[7] == 100) {
-        stmp[7] = 0;
-        stmp[6] = stmp[6] + 1;
-
-        if (stmp[6] == 100) {
-            stmp[6] = 0;
-            stmp[5] = stmp[5] + 1;
-        }
-    }
-
-    // CAN.sendMsgBuf(0x00, 0, 8, stmp);
-    // delay(100);                       // send data per 100ms
-    // Serial.println("CAN BUS sendMsgBuf ok!");
-
+    // TODO(Khalid): Ensure CAN is properly initialized
+    int tmp = static_cast<int>(sensor_data_array[0].get_temperature_celcius() * 100);
+    can_data[0] = (tmp & 0xFF); 
+    can_data[1] = (tmp >> 8) & 0xFF;
+    CAN.sendMsgBuf(0x00, 0, 8, can_data);
+    delay(100);                       // send data per 100ms
+    Serial.println("CAN BUS sendMsgBuf ok!");
 }
 
 
