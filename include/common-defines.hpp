@@ -1,6 +1,10 @@
 #ifndef INCLUDE_COMMON_DEFINES_HPP
 #define INCLUDE_COMMON_DEFINES_HPP
 
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include "mcp2515_can.h"
+
 #define CAN_2515
 
 // For Arduino MCP2515 Hat:
@@ -11,5 +15,6 @@ const int CAN_INT_PIN = 2;
 const int ONE_WIRE_BUS = 4;
 const int N_TEMPERATURE_SENSOR = 1;
 const int TEMPERATURE_PRECISION = 12;
+const MCP_BITTIME_SETUP CONFIG_BITRATE = CAN_1000KBPS;
 
 #endif // INCLUDE_COMMON_DEFINES_HPP

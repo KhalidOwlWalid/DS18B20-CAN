@@ -1,21 +1,16 @@
 #include <SPI.h>
-#include <OneWire.h>
-#include <DallasTemperature.h>
-#include "mcp2515_can.h"
 #include <array>
-
 #include "common-defines.hpp"
 
 OneWire one_wire(ONE_WIRE_BUS);
 DallasTemperature sensors(&one_wire);
 int device_count;
-
 mcp2515_can CAN(SPI_CS_PIN); // Set CS pin
 
 std::array<DeviceAddress, N_TEMPERATURE_SENSOR> sensor_address_array;
 
 static void init_can() {
-    while (CAN_OK != CAN.begin(CAN_1000KBPS)) {             // init can bus : baudrate = 500k
+    while (CAN_OK != CAN.begin(CONFIG_BITRATE)) {             // init can bus : baudrate = 500k
         Serial.println("CAN init fail, retry...");
         delay(100);
     }
@@ -134,6 +129,8 @@ void setup() {
     Serial.println("Initialization successful!");
 }
 
+unsigned char stmp[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+
 void loop() {
 
     // This will issue a global temperature request to all sensors on the
@@ -144,6 +141,25 @@ void loop() {
     for (size_t i = 0; i < device_count; i++) {
         print_data(sensor_address_array[i]);
     }
+
+    // send data:  id = 0x00, standrad frame, data len = 8, stmp: data buf
+    stmp[7] = stmp[7] + 1;
+    if (stmp[7] == 100) {
+        stmp[7] = 0;
+        stmp[6] = stmp[6] + 1;
+
+        if (stmp[6] == 100) {
+            stmp[6] = 0;
+            stmp[5] = stmp[5] + 1;
+        }
+    }
+
+    CAN.sendMsgBuf(0x00, 0, 8, stmp);
+    delay(100);                       // send data per 100ms
+    Serial.println("CAN BUS sendMsgBuf ok!");
+
 }
+
+
 
 // END FILE
