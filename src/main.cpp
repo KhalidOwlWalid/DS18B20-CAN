@@ -7,7 +7,87 @@ DallasTemperature sensors(&one_wire);
 int device_count;
 mcp2515_can CAN(SPI_CS_PIN); // Set CS pin
 
-std::array<DeviceAddress, N_TEMPERATURE_SENSOR> sensor_address_array;
+
+
+class SensorData {
+
+    // Wrapper required since we can't directly return array
+    // in C
+    typedef struct {
+        DeviceAddress dev_addr;
+    } DeviceAddressWrapper;
+
+    public:
+        SensorData() = default;
+        ~SensorData() = default;
+
+        int set_idx(const int idx) {
+            _idx = idx;
+        }
+
+        int get_idx() const {
+            return _idx;
+        }
+        
+        void set_temperature_celcius(DallasTemperature &sensors) {
+            _temperature_C = sensors.getTempC(_dev_address);
+            Serial.println("Temperature is ");
+            Serial.print(_temperature_C);
+
+        }
+
+        float set_temperature_celcius(const float &new_temp) {
+            _temperature_C = new_temp;
+        }
+
+        float get_temperature_celcius() const {
+            return _temperature_C;
+        }
+
+        // function to print the temperature for a device
+        void print_temperature() {
+            if (_temperature_C == DEVICE_DISCONNECTED_C) {
+                Serial.println("Error: Could not read temperature data");
+                return;
+            }
+            Serial.print("Temp C: ");
+            Serial.print(_temperature_C, 3);
+        }
+
+        // function to print a device's resolution
+        void print_resolution() {
+        Serial.print("Resolution: ");
+        Serial.print(sensors.getResolution(_dev_address));
+        Serial.println();
+        }
+
+        // function to print a device address
+        void print_address() {
+            for (uint8_t i = 0; i < 8; i++) {
+                // zero pad the address if necessary
+                if (_dev_address[i] < 16) Serial.print("0");
+                Serial.print(_dev_address[i], HEX);
+            }
+        }
+
+        // main function to print information about a device
+        void print_data() {
+            Serial.print("Device Address: ");
+            print_address();
+            Serial.print(" ");
+            print_temperature();
+            Serial.println();
+        }
+
+        DeviceAddress _dev_address;
+
+    private:
+        float _temperature_C;
+        int _idx;
+
+};
+
+std::array<SensorData, N_TEMPERATURE_SENSOR> sensor_data_array;
 
 static void init_can() {
     while (CAN_OK != CAN.begin(CONFIG_BITRATE)) {             // init can bus : baudrate = 500k
@@ -53,64 +133,25 @@ static bool init_sensors() {
         return false;
     } else {
         Serial.println(device_count);
-        Serial.print(" found");
+        Serial.println(" device(s) found.");
         // We will only be looping with the amount of device count found from before
+        if (!(device_count > 0)) {
+            Serial.println("Fail to find any device.");
+            return false;
+        }
         for (size_t i = 0; i < device_count; i++) {
-            if (!sensors.getAddress(sensor_address_array[i], i)) {
+            if (!sensors.getAddress(sensor_data_array[i]._dev_address, i)) {
                 Serial.println("Unable to find address for Device ");
                 Serial.print(i);
             } else {
                 Serial.println("Sensor found, temperature precision set to ");
                 Serial.print(TEMPERATURE_PRECISION);
-                sensors.setResolution(sensor_address_array[i], TEMPERATURE_PRECISION);
+                sensors.setResolution(sensor_data_array[i]._dev_address, TEMPERATURE_PRECISION);
+                sensor_data_array[i].print_address();
             }
         }
     }
     return true;
-}
-
-// function to print a device address
-void print_address(DeviceAddress deviceAddress)
-{
-  for (uint8_t i = 0; i < 8; i++)
-  {
-    // zero pad the address if necessary
-    if (deviceAddress[i] < 16) Serial.print("0");
-    Serial.print(deviceAddress[i], HEX);
-  }
-}
-
-// function to print the temperature for a device
-void print_temperature(DeviceAddress deviceAddress)
-{
-  float tempC = sensors.getTempC(deviceAddress);
-  if (tempC == DEVICE_DISCONNECTED_C)
-  {
-    Serial.println("Error: Could not read temperature data");
-    return;
-  }
-  Serial.print("Temp C: ");
-  Serial.print(tempC);
-  Serial.print(" Temp F: ");
-  Serial.print(DallasTemperature::toFahrenheit(tempC));
-}
-
-// function to print a device's resolution
-void print_resolution(DeviceAddress deviceAddress)
-{
-  Serial.print("Resolution: ");
-  Serial.print(sensors.getResolution(deviceAddress));
-  Serial.println();
-}
-
-// main function to print information about a device
-void print_data(DeviceAddress deviceAddress)
-{
-  Serial.print("Device Address: ");
-  print_address(deviceAddress);
-  Serial.print(" ");
-  print_temperature(deviceAddress);
-  Serial.println();
 }
 
 void setup() {
@@ -122,10 +163,11 @@ void setup() {
             Serial.println("Sensors successfully initialized!");
             break;
         };
+        Serial.println("Fail to init. Retrying...");
     }
 
     Serial.println("Initializing CAN interface...");
-    init_can();
+    // init_can();
     Serial.println("Initialization successful!");
 }
 
@@ -139,10 +181,15 @@ void loop() {
     sensors.requestTemperatures();
 
     for (size_t i = 0; i < device_count; i++) {
-        print_data(sensor_address_array[i]);
+        SensorData curr_sensor = sensor_data_array[i];
+        curr_sensor.set_temperature_celcius(sensors);
+        curr_sensor.print_data();
     }
 
     // send data:  id = 0x00, standrad frame, data len = 8, stmp: data buf
+    // Figure out a way to arrange this over CAN
+    // device_count, temperature1, temperature2 .....
+    // address?
     stmp[7] = stmp[7] + 1;
     if (stmp[7] == 100) {
         stmp[7] = 0;
@@ -154,9 +201,9 @@ void loop() {
         }
     }
 
-    CAN.sendMsgBuf(0x00, 0, 8, stmp);
-    delay(100);                       // send data per 100ms
-    Serial.println("CAN BUS sendMsgBuf ok!");
+    // CAN.sendMsgBuf(0x00, 0, 8, stmp);
+    // delay(100);                       // send data per 100ms
+    // Serial.println("CAN BUS sendMsgBuf ok!");
 
 }
 

@@ -17,4 +17,6 @@ const int N_TEMPERATURE_SENSOR = 1;
 const int TEMPERATURE_PRECISION = 12;
 const MCP_BITTIME_SETUP CONFIG_BITRATE = CAN_1000KBPS;
 
+const unsigned long can_id = 0x01;
+
 #endif // INCLUDE_COMMON_DEFINES_HPP
