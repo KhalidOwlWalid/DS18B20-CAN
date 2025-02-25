@@ -1,13 +1,12 @@
 #include <SPI.h>
 #include <array>
+#include <cmath>
 #include "common-defines.hpp"
 
 OneWire one_wire(ONE_WIRE_BUS);
 DallasTemperature sensors(&one_wire);
 int device_count;
 mcp2515_can CAN(SPI_CS_PIN); // Set CS pin
-
-
 
 class SensorData {
 
@@ -36,14 +35,9 @@ class SensorData {
                 return;
             }
             _temperature_C = tmp;
-            Serial.println("I am in set: ");
-            Serial.print(_temperature_C);
         }
 
         float get_temperature_celcius() const {
-            Serial.println("I am in here: ");
-            // Serial.print(_temperature_C);
-            Serial.print(_temperature_C, 3);
             return _temperature_C;
         }
 
@@ -84,6 +78,12 @@ class SensorData {
         float _temperature_C;
         int _idx;
 
+};
+
+struct can_frame {
+    int id;
+    int dlc;
+    uint8_t data[8];
 };
 
 std::array<SensorData, N_TEMPERATURE_SENSOR> sensor_data_array;
@@ -139,14 +139,18 @@ static bool init_sensors() {
             return false;
         }
         for (size_t i = 0; i < device_count; i++) {
+            // Just so you know, the device address is passed as a pointer in which the address is 
+            // populated with the _one_wire->search(address) function of OneWire
             if (!sensors.getAddress(sensor_data_array[i]._dev_address, i)) {
                 Serial.println("Unable to find address for Device ");
                 Serial.print(i);
             } else {
+                // Set the index which will be useful during error checks later on
+                sensor_data_array[i].set_idx(i);
+                sensor_data_array[i].print_address();
                 Serial.println("Sensor found, temperature precision set to ");
                 Serial.print(TEMPERATURE_PRECISION);
                 sensors.setResolution(sensor_data_array[i]._dev_address, TEMPERATURE_PRECISION);
-                sensor_data_array[i].print_address();
             }
         }
     }
@@ -170,7 +174,6 @@ void setup() {
     Serial.println("Initialization successful!");
 }
 
-
 void loop() {
 
     // This will issue a global temperature request to all sensors on the
@@ -178,23 +181,53 @@ void loop() {
     // convert the temperature reading
     sensors.requestTemperatures();
 
-    unsigned char can_data[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-
     for (size_t i = 0; i < device_count; i++) {
         SensorData &curr_sensor = sensor_data_array[i];
         curr_sensor.set_temperature_celcius(sensors);
-        curr_sensor.print_data();
+        // curr_sensor.print_data();
+    }
+
+    // Each sensor will take up 2 bytes to send data 
+    size_t n_bytes = device_count * 2; 
+    // Each frame (or CAN ID) can only carry a maximum of 8 bytes payload
+    // So, if it exceed this amount, then we will split the data into
+    // multiple sequential frame
+    // Ceiling is used to round up the number of frame we should populate
+    size_t n_frame = std::ceil(n_bytes/8);
+
+    // Example: If we have 6 sensors, then it would result in 12 bytes of data
+    // That means that once the data populated has reached 8 bytes, we would need to
+    // transmit the data with another CAN ID with the expected number of payload
+    can_frame can_data_to_tx;
+    for (size_t i = 0; i < device_count; i++) {
+
+        // Add a factor of 100
+        signed int curr_sensor_temp = static_cast<int>(sensor_data_array[i].get_temperature_celcius() * 100);
+        can_data_to_tx.dlc = 8;
+        can_data_to_tx.id = can_id;
+
+        // Little endian
+        can_data_to_tx.data[2*i] = (curr_sensor_temp & 0xFF);
+        can_data_to_tx.data[2*i + 1] = (curr_sensor_temp >> 8 & 0xFF);
+        
+        Serial.print("Index: ");
+        Serial.print(i);
+        Serial.print(" | Temperature: ");
+        Serial.print(curr_sensor_temp);
+        Serial.print("| Byte: ");
+        Serial.print(can_data_to_tx.data[2*i], HEX);
+        Serial.print(" ");
+        Serial.print(can_data_to_tx.data[2*i + 1], HEX);
+        Serial.print(" | Calculation: ");
+        Serial.print((2*i)*8);
+        Serial.print(" ");
+        Serial.print((2*i + 1)*8);
+        Serial.print(" Temperature: ");
+        Serial.println(sensor_data_array[i].get_temperature_celcius());
     }
 
     // TODO(Khalid): Ensure CAN is properly initialized
-    int tmp = static_cast<int>(sensor_data_array[0].get_temperature_celcius() * 100);
-    can_data[0] = (tmp & 0xFF); 
-    can_data[1] = (tmp >> 8) & 0xFF;
-    CAN.sendMsgBuf(0x00, 0, 8, can_data);
-    delay(100);                       // send data per 100ms
-    Serial.println("CAN BUS sendMsgBuf ok!");
+    CAN.sendMsgBuf(can_data_to_tx.id, 0, can_data_to_tx.dlc, can_data_to_tx.data);
+    delay(20); 
+    // Serial.println("CAN BUS sendMsgBuf ok!");
 }
-
-
-
-// END FILE
