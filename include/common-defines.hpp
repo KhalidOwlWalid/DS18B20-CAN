@@ -13,10 +13,11 @@
 const int SPI_CS_PIN = 9;
 const int CAN_INT_PIN = 2;
 const int ONE_WIRE_BUS = 4;
-const int N_TEMPERATURE_SENSOR = 1;
+const int N_TEMPERATURE_SENSOR = 5;
 const int TEMPERATURE_PRECISION = 12;
 const MCP_BITTIME_SETUP CONFIG_BITRATE = CAN_1000KBPS;
 
-const unsigned long can_id = 0x01;
+const unsigned long can_dev_count_id = 0x01;
+const unsigned long can_tx_id = 0x02;
 
 #endif // INCLUDE_COMMON_DEFINES_HPP

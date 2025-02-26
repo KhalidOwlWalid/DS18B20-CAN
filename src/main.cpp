@@ -84,6 +84,16 @@ struct can_frame {
     int id;
     int dlc;
     uint8_t data[8];
+
+    void set_can_id(const int new_can_id) {
+        id = new_can_id;
+    }
+
+    void reset_can_data() {
+        for (size_t i = 0; i < sizeof(data)/sizeof(uint8_t); i++) {
+            data[i] = 0;
+        }
+    }
 };
 
 std::array<SensorData, N_TEMPERATURE_SENSOR> sensor_data_array;
@@ -189,6 +199,15 @@ void loop() {
 
     // Each sensor will take up 2 bytes to send data 
     size_t n_bytes = device_count * 2; 
+
+    // Transmit the number of device detected
+    can_frame can_data_dev_count;
+    can_data_dev_count.id = can_dev_count_id;
+    // Limited to n = 255
+    can_data_dev_count.dlc = 1;
+    can_data_dev_count.data[0] = (device_count & 0xFF);
+    CAN.sendMsgBuf(can_data_dev_count.id, 0, can_data_dev_count.dlc, can_data_dev_count.data);
+
     // Each frame (or CAN ID) can only carry a maximum of 8 bytes payload
     // So, if it exceed this amount, then we will split the data into
     // multiple sequential frame
@@ -199,34 +218,47 @@ void loop() {
     // That means that once the data populated has reached 8 bytes, we would need to
     // transmit the data with another CAN ID with the expected number of payload
     can_frame can_data_to_tx;
+    can_data_to_tx.dlc = 8;
+    can_data_to_tx.id = can_tx_id;
+    size_t frame_count = 0;
     for (size_t i = 0; i < device_count; i++) {
 
+        // You will notice there is plenty of the index takes a modulus of 4
+        // This is because we made it so that each frame can only carry 4 sensor readings
+        // each being 2 bytes. If this exceeds, then we wrap around and start counting
+        // from index 0 to 3 again
+        if (i % 4 == 0 && i != 0) {
+            // Increment frame count
+            frame_count++;
+            // Send the current CAN msg then reset to prepare for the next one
+            CAN.sendMsgBuf(can_data_to_tx.id, 0, can_data_to_tx.dlc, can_data_to_tx.data);
+            // Reset CAN data frame
+            can_data_to_tx.reset_can_data();
+        }
+
         // Add a factor of 100
-        signed int curr_sensor_temp = static_cast<int>(sensor_data_array[i].get_temperature_celcius() * 100);
-        can_data_to_tx.dlc = 8;
-        can_data_to_tx.id = can_id;
+        signed int curr_sensor_temp = static_cast<int>(sensor_data_array[(4 * frame_count) + (i % 4)].get_temperature_celcius() * 100);
 
         // Little endian
-        can_data_to_tx.data[2*i] = (curr_sensor_temp & 0xFF);
-        can_data_to_tx.data[2*i + 1] = (curr_sensor_temp >> 8 & 0xFF);
+        can_data_to_tx.data[2*(i % 4)] = (curr_sensor_temp & 0xFF);
+        can_data_to_tx.data[2*(i % 4) + 1] = (curr_sensor_temp >> 8 & 0xFF);
         
+        #ifdef DEBUG
         Serial.print("Index: ");
         Serial.print(i);
+        Serial.print(" | Byte: ");
+        Serial.print(can_data_to_tx.data[2*(i % 4)], HEX);
+        Serial.print(" ");
+        Serial.print(can_data_to_tx.data[2*i + (1 % 4)], HEX);
         Serial.print(" | Temperature: ");
         Serial.print(curr_sensor_temp);
-        Serial.print("| Byte: ");
-        Serial.print(can_data_to_tx.data[2*i], HEX);
-        Serial.print(" ");
-        Serial.print(can_data_to_tx.data[2*i + 1], HEX);
-        Serial.print(" | Calculation: ");
-        Serial.print((2*i)*8);
-        Serial.print(" ");
-        Serial.print((2*i + 1)*8);
         Serial.print(" Temperature: ");
         Serial.println(sensor_data_array[i].get_temperature_celcius());
+        #endif
     }
-
     // TODO(Khalid): Ensure CAN is properly initialized
+    // Send the remaining CAN msg
+    // TODO: Pad the rest?
     CAN.sendMsgBuf(can_data_to_tx.id, 0, can_data_to_tx.dlc, can_data_to_tx.data);
     delay(20); 
     // Serial.println("CAN BUS sendMsgBuf ok!");
